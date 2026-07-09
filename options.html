@@ -14,7 +14,7 @@
       h1 { font-size: 20px; }
       h1 span { color: #7c6cf0; }
       label { display: block; font-weight: 600; margin: 20px 0 6px; }
-      input {
+      input, select {
         width: 100%;
         font: 13px/1.4 ui-monospace, monospace;
         padding: 8px 10px;
@@ -22,6 +22,8 @@
         border-radius: 6px;
         box-sizing: border-box;
       }
+      .inactive { opacity: 0.45; }
+      a { color: #7c6cf0; }
       button {
         margin-top: 12px;
         font: inherit;
@@ -40,13 +42,35 @@
   <body>
     <h1>Catch<span>Up</span> options</h1>
     <p class="note">
-      CatchUp calls the Anthropic API directly from this extension. Your key is
-      stored only in this browser profile (<code>chrome.storage.local</code>)
-      and is sent only to <code>api.anthropic.com</code>.
+      CatchUp calls your chosen AI provider directly from this extension. Keys
+      are stored only in this browser profile (<code>chrome.storage.local</code>)
+      and are sent only to that provider's API.
     </p>
 
-    <label for="api-key">Anthropic API key</label>
-    <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" />
+    <label for="provider">Answer engine</label>
+    <select id="provider">
+      <option value="gemini">Google Gemini — free tier (gemini-2.5-flash)</option>
+      <option value="anthropic">Anthropic Claude — paid (claude-sonnet-4-6)</option>
+    </select>
+
+    <div id="gemini-section">
+      <label for="gemini-key">Gemini API key</label>
+      <input id="gemini-key" type="password" placeholder="AIza…" autocomplete="off" />
+      <p class="note">
+        Free, no card needed: create one at
+        <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>.
+      </p>
+    </div>
+
+    <div id="anthropic-section">
+      <label for="api-key">Anthropic API key</label>
+      <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" />
+      <p class="note">
+        Requires paid credits: create one at
+        <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>.
+      </p>
+    </div>
+
     <div>
       <button id="save">Save</button>
       <span id="status"></span>

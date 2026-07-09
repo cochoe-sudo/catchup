@@ -13,9 +13,11 @@ import type {
   AskRequest,
   AskResponse,
   AutoSubsMessage,
+  Provider,
   StoredSubtitles,
 } from "../lib/messages";
 import { askClaude, describeApiError } from "./api";
+import { askGemini } from "./gemini";
 
 type SubsByVideo = Record<string, StoredSubtitles>;
 
@@ -49,17 +51,22 @@ async function handleAutoSubs(message: AutoSubsMessage): Promise<void> {
 
 async function handleAsk(request: AskRequest): Promise<AskResponse> {
   const stored = await chrome.storage.local.get([
+    STORAGE_KEYS.provider,
     STORAGE_KEYS.apiKey,
+    STORAGE_KEYS.geminiKey,
     STORAGE_KEYS.subtitles,
     STORAGE_KEYS.subsByVideo,
   ]);
 
-  const apiKey = stored[STORAGE_KEYS.apiKey] as string | undefined;
+  const provider = (stored[STORAGE_KEYS.provider] as Provider | undefined) ?? "anthropic";
+  const apiKey = stored[
+    provider === "gemini" ? STORAGE_KEYS.geminiKey : STORAGE_KEYS.apiKey
+  ] as string | undefined;
   if (!apiKey) {
     return {
       ok: false,
       code: "no_api_key",
-      error: "No API key set. Add your Anthropic API key in CatchUp's options.",
+      error: `No ${provider === "gemini" ? "Gemini" : "Anthropic"} API key set. Add one in CatchUp's options.`,
     };
   }
 
@@ -93,16 +100,14 @@ async function handleAsk(request: AskRequest): Promise<AskResponse> {
     transcript: formatTranscript(visibleCues),
   });
 
+  const params = { apiKey, system, history: request.history, question: request.question };
   try {
-    const answer = await askClaude({
-      apiKey,
-      system,
-      history: request.history,
-      question: request.question,
-    });
+    const answer =
+      provider === "gemini" ? await askGemini(params) : await askClaude(params);
     return { ok: true, answer };
   } catch (err) {
-    return { ok: false, error: describeApiError(err) };
+    // askGemini throws plain Errors with user-ready messages
+    return { ok: false, error: provider === "gemini" && err instanceof Error ? err.message : describeApiError(err) };
   }
 }
 

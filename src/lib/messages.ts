@@ -66,8 +66,13 @@ export interface StoredSubtitles {
   savedAt: number;
 }
 
+export type Provider = "anthropic" | "gemini";
+
 export const STORAGE_KEYS = {
+  /** Which answer engine to use. Defaults to "anthropic". */
+  provider: "catchup.provider",
   apiKey: "catchup.apiKey",
+  geminiKey: "catchup.geminiKey",
   /** Manually loaded subtitles — global fallback when no per-video entry exists. */
   subtitles: "catchup.subtitles",
   /** Record<videoKey, StoredSubtitles> — auto-captured (and keyed manual) subtitles. */
