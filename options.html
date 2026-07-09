@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CatchUp — Options</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        max-width: 560px;
+        margin: 48px auto;
+        padding: 0 20px;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 20px; }
+      h1 span { color: #7c6cf0; }
+      label { display: block; font-weight: 600; margin: 20px 0 6px; }
+      input {
+        width: 100%;
+        font: 13px/1.4 ui-monospace, monospace;
+        padding: 8px 10px;
+        border: 1px solid #888;
+        border-radius: 6px;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 12px;
+        font: inherit;
+        font-weight: 600;
+        padding: 7px 16px;
+        border: none;
+        border-radius: 6px;
+        background: #7c6cf0;
+        color: #fff;
+        cursor: pointer;
+      }
+      #status { margin-left: 10px; font-size: 13px; }
+      p.note { color: #888; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>Catch<span>Up</span> options</h1>
+    <p class="note">
+      CatchUp calls the Anthropic API directly from this extension. Your key is
+      stored only in this browser profile (<code>chrome.storage.local</code>)
+      and is sent only to <code>api.anthropic.com</code>.
+    </p>
+
+    <label for="api-key">Anthropic API key</label>
+    <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off" />
+    <div>
+      <button id="save">Save</button>
+      <span id="status"></span>
+    </div>
+
+    <script type="module" src="/src/options/main.ts"></script>
+  </body>
+</html>
