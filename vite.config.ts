@@ -9,16 +9,18 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        popup: "popup.html",
         options: "options.html",
         background: "src/background/index.ts",
         content: "src/content/index.ts",
         "page-youtube": "src/page/youtube.ts",
         "page-netflix": "src/page/netflix.ts",
+        "page-texttracks": "src/page/texttracks.ts",
       },
       output: {
         entryFileNames: (chunk) =>
-          ["background", "content", "page-youtube", "page-netflix"].includes(chunk.name)
+          ["background", "content", "page-youtube", "page-netflix", "page-texttracks"].includes(
+            chunk.name,
+          )
             ? "[name].js"
             : "assets/[name]-[hash].js",
       },

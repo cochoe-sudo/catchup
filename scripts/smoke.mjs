@@ -29,7 +29,12 @@ globalThis.chrome = {
         listeners.push(fn);
       },
     },
+    onInstalled: { addListener() {} },
+    openOptionsPage() {},
   },
+  action: { onClicked: { addListener() {} } },
+  tabs: { async query() { return []; }, async sendMessage() {} },
+  scripting: { async executeScript() {} },
 };
 
 await import("../dist/background.js");
@@ -70,22 +75,39 @@ res = await send(ask(10));
 if (res.ok !== true || !/No dialogue has occurred yet/.test(res.answer))
   throw new Error(`bad empty-transcript response: ${JSON.stringify(res)}`);
 
-// 4. Auto-captured subtitles: fire-and-forget message parses VTT and stores per video
-const autoResult = listeners[0](
-  {
-    type: "CATCHUP_AUTO_SUBS",
-    videoKey: "yt:abc123",
-    label: "English · YouTube captions",
-    vtt: "WEBVTT\n\n00:01.000 --> 00:03.000\nAuto line one.\n\n00:05.000 --> 00:07.000\nAuto line two.\n",
-  },
-  {},
-  () => {},
-);
-if (autoResult === true) throw new Error("AUTO_SUBS must not hold the channel open");
-await new Promise((r) => setTimeout(r, 50)); // let the async handler store
+// 4. Auto-captured VTT parses and stores per video, and responds with the line count
+let autoRes = await send({
+  type: "CATCHUP_AUTO_SUBS",
+  videoKey: "yt:abc123",
+  label: "English · YouTube captions",
+  vtt: "WEBVTT\n\n00:01.000 --> 00:03.000\nAuto line one.\n\n00:05.000 --> 00:07.000\nAuto line two.\n",
+});
+if (autoRes.ok !== true || autoRes.lines !== 2)
+  throw new Error(`bad AUTO_SUBS vtt response: ${JSON.stringify(autoRes)}`);
 const map = storage.get("catchup.subsByVideo");
 if (map?.["yt:abc123"]?.cues?.length !== 2)
   throw new Error(`auto subs not stored: ${JSON.stringify(map)}`);
+
+// 4b. Cue-payload variant (generic textTracks capture): sanitized, sorted, stored
+autoRes = await send({
+  type: "CATCHUP_AUTO_SUBS",
+  videoKey: "gen:example.com/watch/1",
+  label: "English · captured from player",
+  cues: [
+    { startMs: 9000, endMs: 10_000, text: "<i>Second</i>" },
+    { startMs: 1000, endMs: 2000, text: "First" },
+    { startMs: -5, endMs: 0, text: "invalid, dropped" },
+  ],
+});
+if (autoRes.ok !== true || autoRes.lines !== 2)
+  throw new Error(`bad AUTO_SUBS cues response: ${JSON.stringify(autoRes)}`);
+const genEntry = storage.get("catchup.subsByVideo")["gen:example.com/watch/1"];
+if (genEntry.cues[0].text !== "First" || genEntry.cues[1].text !== "Second")
+  throw new Error(`cue payload not sanitized/sorted: ${JSON.stringify(genEntry.cues)}`);
+
+// 4c. Unparseable manual file -> ok:false with a message
+autoRes = await send({ type: "CATCHUP_AUTO_SUBS", videoKey: "gen:x/y", label: "bad.srt", vtt: "not a subtitle file" });
+if (autoRes.ok !== false) throw new Error("unparseable subtitles must return ok:false");
 
 // 5. Per-video subtitles take priority; empty-before-first-cue path proves lookup
 //    (the global manual cue at 60s would be visible at t=30, the yt one at 61s is not)

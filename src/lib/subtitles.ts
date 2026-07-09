@@ -64,6 +64,11 @@ function cleanCueText(lines: string[]): string {
     .trim();
 }
 
+/** Clean a single cue's raw text (tags, entities, whitespace) — for cue payloads captured via the TextTrack API. */
+export function sanitizeCueText(text: string): string {
+  return cleanCueText(text.split("\n"));
+}
+
 const VTT_METADATA_BLOCK = /^(WEBVTT|NOTE|STYLE|REGION)\b/;
 
 /**

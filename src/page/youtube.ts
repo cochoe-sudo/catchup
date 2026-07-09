@@ -12,6 +12,10 @@
  */
 
 (() => {
+  const w = window as unknown as Record<string, unknown>;
+  if (w["__catchupYouTube"]) return; // double-injection guard
+  w["__catchupYouTube"] = true;
+
   const EVENT_SUBS = "catchup:subtitles";
   const EVENT_PING = "catchup:ready";
 

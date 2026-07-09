@@ -6,13 +6,15 @@
  */
 
 import { cuesUpTo, formatTimestamp, formatTranscript } from "../lib/truncate";
-import { parseSubtitles } from "../lib/subtitles";
+import { parseSubtitles, sanitizeCueText } from "../lib/subtitles";
+import type { Cue } from "../lib/subtitles";
 import { buildSystemPrompt, EMPTY_TRANSCRIPT_ANSWER } from "../lib/prompt";
 import { MAX_STORED_VIDEOS, STORAGE_KEYS } from "../lib/messages";
 import type {
   AskRequest,
   AskResponse,
   AutoSubsMessage,
+  AutoSubsResponse,
   Provider,
   StoredSubtitles,
 } from "../lib/messages";
@@ -21,19 +23,41 @@ import { askGemini } from "./gemini";
 
 type SubsByVideo = Record<string, StoredSubtitles>;
 
-/** Parse auto-captured VTT and store it keyed by video, LRU-capped. */
-async function handleAutoSubs(message: AutoSubsMessage): Promise<void> {
-  let stored: StoredSubtitles;
+/** Validate + clean a pre-extracted cue payload (from the textTracks capture). */
+function cuesFromPayload(raw: NonNullable<AutoSubsMessage["cues"]>): Cue[] {
+  const cues: Cue[] = [];
+  for (const cue of raw) {
+    if (
+      !cue ||
+      typeof cue.startMs !== "number" ||
+      !Number.isFinite(cue.startMs) ||
+      cue.startMs < 0 ||
+      typeof cue.text !== "string"
+    ) {
+      continue;
+    }
+    const text = sanitizeCueText(cue.text);
+    if (!text) continue;
+    const endMs = typeof cue.endMs === "number" && Number.isFinite(cue.endMs) ? cue.endMs : cue.startMs;
+    cues.push({ startMs: cue.startMs, endMs, text });
+  }
+  cues.sort((a, b) => a.startMs - b.startMs);
+  return cues;
+}
+
+/** Parse/clean captured subtitles and store them keyed by video, LRU-capped. */
+async function handleAutoSubs(message: AutoSubsMessage): Promise<AutoSubsResponse> {
+  let cues: Cue[];
   try {
-    stored = {
-      label: message.label,
-      cues: parseSubtitles(message.vtt),
-      savedAt: Date.now(),
-    };
-  } catch {
-    return; // unparseable capture — manual loading still works
+    cues = message.cues ? cuesFromPayload(message.cues) : parseSubtitles(message.vtt ?? "");
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  if (cues.length === 0) {
+    return { ok: false, error: "No usable subtitle lines found." };
   }
 
+  const stored: StoredSubtitles = { label: message.label, cues, savedAt: Date.now() };
   const current = await chrome.storage.local.get(STORAGE_KEYS.subsByVideo);
   const map = (current[STORAGE_KEYS.subsByVideo] ?? {}) as SubsByVideo;
   map[message.videoKey] = stored;
@@ -47,6 +71,7 @@ async function handleAutoSubs(message: AutoSubsMessage): Promise<void> {
   }
 
   await chrome.storage.local.set({ [STORAGE_KEYS.subsByVideo]: map });
+  return { ok: true, lines: cues.length };
 }
 
 async function handleAsk(request: AskRequest): Promise<AskResponse> {
@@ -112,9 +137,20 @@ async function handleAsk(request: AskRequest): Promise<AskResponse> {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "CATCHUP_OPEN_OPTIONS") {
+    void chrome.runtime.openOptionsPage();
+    return;
+  }
   if (message?.type === "CATCHUP_AUTO_SUBS") {
-    void handleAutoSubs(message as AutoSubsMessage);
-    return; // fire-and-forget
+    handleAutoSubs(message as AutoSubsMessage)
+      .then(sendResponse)
+      .catch((err: unknown) =>
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        } satisfies AutoSubsResponse),
+      );
+    return true;
   }
   if (message?.type !== "CATCHUP_ASK") return;
   handleAsk(message as AskRequest)
@@ -126,4 +162,54 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } satisfies AskResponse),
     );
   return true; // keep the message channel open for the async response
+});
+
+// ---- sidebar toggle + no-refresh-needed injection ---------------------------
+
+/** The page-world capture script that applies to a URL. */
+function pageScriptFor(url: string): string {
+  if (url.includes("youtube.com")) return "page-youtube.js";
+  if (url.includes("netflix.com")) return "page-netflix.js";
+  return "page-texttracks.js";
+}
+
+async function injectInto(tabId: number, url: string): Promise<void> {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [pageScriptFor(url)],
+    world: "MAIN",
+  });
+}
+
+// Toolbar icon click toggles the in-page sidebar. If the content script isn't
+// there yet (tab predates the extension / an update), inject it on the spot.
+chrome.action.onClicked.addListener((tab) => {
+  void (async () => {
+    if (!tab.id || !tab.url || !/^https?:/.test(tab.url)) {
+      void chrome.runtime.openOptionsPage();
+      return;
+    }
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: "CATCHUP_TOGGLE" });
+    } catch {
+      try {
+        await injectInto(tab.id, tab.url);
+        await chrome.tabs.sendMessage(tab.id, { type: "CATCHUP_TOGGLE" });
+      } catch {
+        void chrome.runtime.openOptionsPage(); // chrome://, Web Store, etc.
+      }
+    }
+  })();
+});
+
+// On install/update, inject into every open tab so nothing needs a refresh.
+// (Both scripts guard against double-injection.)
+chrome.runtime.onInstalled.addListener(() => {
+  void (async () => {
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    await Promise.allSettled(
+      tabs.flatMap((tab) => (tab.id && tab.url ? [injectInto(tab.id, tab.url)] : [])),
+    );
+  })();
 });

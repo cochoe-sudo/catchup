@@ -1,42 +1,35 @@
 /**
- * Message contracts between popup <-> content script <-> background.
- * Types only — the content script may import from here ONLY with
- * `import type` (content scripts can't load ES modules at runtime).
+ * Message contracts between content script <-> background, plus storage keys.
+ * Types only — the content and page scripts may import from here ONLY with
+ * `import type` (they can't load ES modules at runtime).
  */
 
 import type { Cue } from "./subtitles";
 
-// ---- popup -> content script ----
+// ---- background -> content script ----
 
-export interface GetStateRequest {
-  type: "CATCHUP_GET_STATE";
+export interface ToggleSidebarMessage {
+  type: "CATCHUP_TOGGLE";
 }
 
-export type GetStateResponse =
-  | {
-      ok: true;
-      title: string;
-      currentTimeSec: number;
-      paused: boolean;
-      /** Stable per-video id ("yt:<videoId>" / "nf:<movieId>") or null. */
-      videoKey: string | null;
-    }
-  | {
-      ok: false;
-      error: "no_video";
-    };
+// ---- content script -> background ----
 
-// ---- content script -> background (auto-captured subtitles) ----
+export interface OpenOptionsMessage {
+  type: "CATCHUP_OPEN_OPTIONS";
+}
 
+/** Captured subtitles: raw file text (auto-capture VTT or manual .srt/.vtt) or pre-extracted cues (textTracks). */
 export interface AutoSubsMessage {
   type: "CATCHUP_AUTO_SUBS";
   videoKey: string;
   label: string;
-  /** Raw WebVTT text captured from the page. */
-  vtt: string;
+  /** Raw SRT/VTT text to parse. */
+  vtt?: string;
+  /** Already-extracted cues (from the generic textTracks capture). */
+  cues?: Cue[];
 }
 
-// ---- popup -> background ----
+export type AutoSubsResponse = { ok: true; lines: number } | { ok: false; error: string };
 
 export interface ChatTurn {
   question: string;
@@ -49,7 +42,7 @@ export interface AskRequest {
   currentTimeSec: number;
   question: string;
   history: ChatTurn[];
-  /** Used to look up auto-captured subtitles for this exact video. */
+  /** Used to look up captured subtitles for this exact video. */
   videoKey: string | null;
 }
 
@@ -60,7 +53,7 @@ export type AskResponse =
 // ---- chrome.storage.local shapes ----
 
 export interface StoredSubtitles {
-  /** User-facing label: file name or "pasted subtitles". */
+  /** User-facing label: track name, file name, etc. */
   label: string;
   cues: Cue[];
   savedAt: number;
@@ -75,7 +68,7 @@ export const STORAGE_KEYS = {
   geminiKey: "catchup.geminiKey",
   /** Manually loaded subtitles — global fallback when no per-video entry exists. */
   subtitles: "catchup.subtitles",
-  /** Record<videoKey, StoredSubtitles> — auto-captured (and keyed manual) subtitles. */
+  /** Record<videoKey, StoredSubtitles> — captured (and keyed manual) subtitles. */
   subsByVideo: "catchup.subsByVideo",
 } as const;
 

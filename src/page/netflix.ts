@@ -12,6 +12,10 @@
  */
 
 (() => {
+  const w = window as unknown as Record<string, unknown>;
+  if (w["__catchupNetflix"]) return; // double-injection guard (must not hook JSON.parse twice)
+  w["__catchupNetflix"] = true;
+
   const EVENT_SUBS = "catchup:subtitles";
   const EVENT_PING = "catchup:ready";
   const WEBVTT_FMT = "webvtt-lssdh-ios8";

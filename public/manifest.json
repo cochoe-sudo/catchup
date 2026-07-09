@@ -1,10 +1,12 @@
 {
   "manifest_version": 3,
   "name": "CatchUp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Spoiler-safe Q&A for streaming video. Ask what you missed — answers use only what has happened up to your current timestamp.",
-  "permissions": ["storage"],
+  "minimum_chrome_version": "111",
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
+    "<all_urls>",
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*"
   ],
@@ -12,10 +14,9 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "minimum_chrome_version": "111",
   "content_scripts": [
     {
-      "matches": ["*://*.netflix.com/*", "*://*.youtube.com/*"],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle"
     },
@@ -30,11 +31,17 @@
       "js": ["page-netflix.js"],
       "run_at": "document_start",
       "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": ["*://*.youtube.com/*", "*://*.netflix.com/*"],
+      "js": ["page-texttracks.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "CatchUp — ask about what you're watching"
+    "default_title": "CatchUp — toggle the sidebar"
   },
   "options_page": "options.html"
 }
