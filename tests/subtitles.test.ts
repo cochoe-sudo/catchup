@@ -123,6 +123,11 @@ Real line
     expect(cues[0]!.text).toBe("Tom & Jerry <3");
   });
 
+  it("strips directional marks found in Netflix WebVTT", () => {
+    const cues = parseSubtitles("1\n00:00:01,000 --> 00:00:02,000\n&lrm;Hello there.&rlm;\n");
+    expect(cues[0]!.text).toBe("Hello there.");
+  });
+
   it("strips ASS-style override braces", () => {
     const cues = parseSubtitles("1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Sign text\n");
     expect(cues[0]!.text).toBe("Sign text");

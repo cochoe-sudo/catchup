@@ -13,10 +13,12 @@ export default defineConfig({
         options: "options.html",
         background: "src/background/index.ts",
         content: "src/content/index.ts",
+        "page-youtube": "src/page/youtube.ts",
+        "page-netflix": "src/page/netflix.ts",
       },
       output: {
         entryFileNames: (chunk) =>
-          chunk.name === "background" || chunk.name === "content"
+          ["background", "content", "page-youtube", "page-netflix"].includes(chunk.name)
             ? "[name].js"
             : "assets/[name]-[hash].js",
       },

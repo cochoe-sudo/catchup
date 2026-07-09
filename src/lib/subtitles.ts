@@ -45,6 +45,9 @@ const HTML_ENTITIES: Record<string, string> = {
   "&#39;": "'",
   "&apos;": "'",
   "&nbsp;": " ",
+  // Directional marks — Netflix WebVTT files are littered with these.
+  "&lrm;": "",
+  "&rlm;": "",
 };
 
 function cleanCueText(lines: string[]): string {

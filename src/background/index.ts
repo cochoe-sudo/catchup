@@ -6,15 +6,52 @@
  */
 
 import { cuesUpTo, formatTimestamp, formatTranscript } from "../lib/truncate";
+import { parseSubtitles } from "../lib/subtitles";
 import { buildSystemPrompt, EMPTY_TRANSCRIPT_ANSWER } from "../lib/prompt";
-import { STORAGE_KEYS } from "../lib/messages";
-import type { AskRequest, AskResponse, StoredSubtitles } from "../lib/messages";
+import { MAX_STORED_VIDEOS, STORAGE_KEYS } from "../lib/messages";
+import type {
+  AskRequest,
+  AskResponse,
+  AutoSubsMessage,
+  StoredSubtitles,
+} from "../lib/messages";
 import { askClaude, describeApiError } from "./api";
+
+type SubsByVideo = Record<string, StoredSubtitles>;
+
+/** Parse auto-captured VTT and store it keyed by video, LRU-capped. */
+async function handleAutoSubs(message: AutoSubsMessage): Promise<void> {
+  let stored: StoredSubtitles;
+  try {
+    stored = {
+      label: message.label,
+      cues: parseSubtitles(message.vtt),
+      savedAt: Date.now(),
+    };
+  } catch {
+    return; // unparseable capture — manual loading still works
+  }
+
+  const current = await chrome.storage.local.get(STORAGE_KEYS.subsByVideo);
+  const map = (current[STORAGE_KEYS.subsByVideo] ?? {}) as SubsByVideo;
+  map[message.videoKey] = stored;
+
+  const keys = Object.keys(map);
+  if (keys.length > MAX_STORED_VIDEOS) {
+    keys
+      .sort((a, b) => (map[a]?.savedAt ?? 0) - (map[b]?.savedAt ?? 0))
+      .slice(0, keys.length - MAX_STORED_VIDEOS)
+      .forEach((key) => delete map[key]);
+  }
+
+  await chrome.storage.local.set({ [STORAGE_KEYS.subsByVideo]: map });
+}
 
 async function handleAsk(request: AskRequest): Promise<AskResponse> {
   const stored = await chrome.storage.local.get([
     STORAGE_KEYS.apiKey,
     STORAGE_KEYS.subtitles,
+    STORAGE_KEYS.subsByVideo,
   ]);
 
   const apiKey = stored[STORAGE_KEYS.apiKey] as string | undefined;
@@ -26,12 +63,18 @@ async function handleAsk(request: AskRequest): Promise<AskResponse> {
     };
   }
 
-  const subtitles = stored[STORAGE_KEYS.subtitles] as StoredSubtitles | undefined;
+  // Auto-captured (or keyed manual) subtitles for THIS video first,
+  // then the global manually-loaded fallback.
+  const map = (stored[STORAGE_KEYS.subsByVideo] ?? {}) as SubsByVideo;
+  const subtitles =
+    (request.videoKey ? map[request.videoKey] : undefined) ??
+    (stored[STORAGE_KEYS.subtitles] as StoredSubtitles | undefined);
   if (!subtitles || subtitles.cues.length === 0) {
     return {
       ok: false,
       code: "no_subtitles",
-      error: "No subtitles loaded. Load an .srt or .vtt file for this video first.",
+      error:
+        "No subtitles for this video yet. They're usually captured automatically a few seconds after playback starts — or load an .srt/.vtt file manually.",
     };
   }
 
@@ -64,6 +107,10 @@ async function handleAsk(request: AskRequest): Promise<AskResponse> {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "CATCHUP_AUTO_SUBS") {
+    void handleAutoSubs(message as AutoSubsMessage);
+    return; // fire-and-forget
+  }
   if (message?.type !== "CATCHUP_ASK") return;
   handleAsk(message as AskRequest)
     .then(sendResponse)

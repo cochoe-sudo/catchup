@@ -18,11 +18,23 @@ export type GetStateResponse =
       title: string;
       currentTimeSec: number;
       paused: boolean;
+      /** Stable per-video id ("yt:<videoId>" / "nf:<movieId>") or null. */
+      videoKey: string | null;
     }
   | {
       ok: false;
       error: "no_video";
     };
+
+// ---- content script -> background (auto-captured subtitles) ----
+
+export interface AutoSubsMessage {
+  type: "CATCHUP_AUTO_SUBS";
+  videoKey: string;
+  label: string;
+  /** Raw WebVTT text captured from the page. */
+  vtt: string;
+}
 
 // ---- popup -> background ----
 
@@ -37,6 +49,8 @@ export interface AskRequest {
   currentTimeSec: number;
   question: string;
   history: ChatTurn[];
+  /** Used to look up auto-captured subtitles for this exact video. */
+  videoKey: string | null;
 }
 
 export type AskResponse =
@@ -54,5 +68,11 @@ export interface StoredSubtitles {
 
 export const STORAGE_KEYS = {
   apiKey: "catchup.apiKey",
+  /** Manually loaded subtitles — global fallback when no per-video entry exists. */
   subtitles: "catchup.subtitles",
+  /** Record<videoKey, StoredSubtitles> — auto-captured (and keyed manual) subtitles. */
+  subsByVideo: "catchup.subsByVideo",
 } as const;
+
+/** Keep the per-video store bounded (LRU by savedAt). */
+export const MAX_STORED_VIDEOS = 8;

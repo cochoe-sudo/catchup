@@ -39,6 +39,7 @@ const el = {
 const history: ChatTurn[] = [];
 const MAX_HISTORY_TURNS = 6;
 let activeTabId: number | null = null;
+let currentVideoKey: string | null = null;
 
 // ---- playback state -------------------------------------------------------
 
@@ -70,13 +71,19 @@ async function refreshHeader(): Promise<void> {
   }
   el.videoTitle.textContent = state.title;
   el.videoTime.textContent = `at ${formatTimestamp(state.currentTimeSec * 1000)}${state.paused ? " (paused)" : ""}`;
+  if (state.videoKey !== currentVideoKey) {
+    currentVideoKey = state.videoKey;
+    void loadStoredSubtitles();
+  }
 }
 
 // ---- subtitles ------------------------------------------------------------
 
 function renderSubtitleStatus(stored: StoredSubtitles | undefined): void {
   if (!stored) {
-    el.subtitleStatus.textContent = "No subtitles loaded";
+    el.subtitleStatus.textContent = currentVideoKey
+      ? "Capturing subtitles… (or load a file)"
+      : "No subtitles loaded";
     el.subtitleStatus.classList.remove("loaded");
     return;
   }
@@ -84,21 +91,42 @@ function renderSubtitleStatus(stored: StoredSubtitles | undefined): void {
   el.subtitleStatus.classList.add("loaded");
 }
 
+/** Per-video subtitles win over the global manual fallback. */
 async function loadStoredSubtitles(): Promise<void> {
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.subtitles);
-  renderSubtitleStatus(stored[STORAGE_KEYS.subtitles] as StoredSubtitles | undefined);
+  const stored = await chrome.storage.local.get([
+    STORAGE_KEYS.subtitles,
+    STORAGE_KEYS.subsByVideo,
+  ]);
+  const map = (stored[STORAGE_KEYS.subsByVideo] ?? {}) as Record<string, StoredSubtitles>;
+  const active =
+    (currentVideoKey ? map[currentVideoKey] : undefined) ??
+    (stored[STORAGE_KEYS.subtitles] as StoredSubtitles | undefined);
+  renderSubtitleStatus(active);
 }
 
 async function saveSubtitles(rawText: string, label: string): Promise<void> {
   try {
     const cues = parseSubtitles(rawText);
     const stored: StoredSubtitles = { label, cues, savedAt: Date.now() };
-    await chrome.storage.local.set({ [STORAGE_KEYS.subtitles]: stored });
+    if (currentVideoKey) {
+      // Tie the manual file to this video so it overrides any auto-capture.
+      const existing = await chrome.storage.local.get(STORAGE_KEYS.subsByVideo);
+      const map = (existing[STORAGE_KEYS.subsByVideo] ?? {}) as Record<string, StoredSubtitles>;
+      map[currentVideoKey] = stored;
+      await chrome.storage.local.set({ [STORAGE_KEYS.subsByVideo]: map });
+    } else {
+      await chrome.storage.local.set({ [STORAGE_KEYS.subtitles]: stored });
+    }
     renderSubtitleStatus(stored);
   } catch (err) {
     addMessage("error", err instanceof Error ? err.message : String(err));
   }
 }
+
+// Live-update the status line when auto-capture lands while the popup is open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes[STORAGE_KEYS.subsByVideo]) void loadStoredSubtitles();
+});
 
 el.fileButton.addEventListener("click", () => el.fileInput.click());
 el.fileInput.addEventListener("change", () => {
@@ -169,6 +197,7 @@ async function ask(): Promise<void> {
     currentTimeSec: state.currentTimeSec,
     question,
     history: history.slice(-MAX_HISTORY_TURNS),
+    videoKey: state.videoKey,
   };
 
   let response: AskResponse;

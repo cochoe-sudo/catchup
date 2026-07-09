@@ -42,12 +42,13 @@ function send(message) {
   });
 }
 
-const ask = (currentTimeSec) => ({
+const ask = (currentTimeSec, videoKey = null) => ({
   type: "CATCHUP_ASK",
   title: "Test Show",
   currentTimeSec,
   question: "What happened?",
   history: [],
+  videoKey,
 });
 
 // 1. No API key
@@ -69,4 +70,35 @@ res = await send(ask(10));
 if (res.ok !== true || !/No dialogue has occurred yet/.test(res.answer))
   throw new Error(`bad empty-transcript response: ${JSON.stringify(res)}`);
 
-console.log("smoke test passed: background bundle loads and handles all pre-API paths");
+// 4. Auto-captured subtitles: fire-and-forget message parses VTT and stores per video
+const autoResult = listeners[0](
+  {
+    type: "CATCHUP_AUTO_SUBS",
+    videoKey: "yt:abc123",
+    label: "English · YouTube captions",
+    vtt: "WEBVTT\n\n00:01.000 --> 00:03.000\nAuto line one.\n\n00:05.000 --> 00:07.000\nAuto line two.\n",
+  },
+  {},
+  () => {},
+);
+if (autoResult === true) throw new Error("AUTO_SUBS must not hold the channel open");
+await new Promise((r) => setTimeout(r, 50)); // let the async handler store
+const map = storage.get("catchup.subsByVideo");
+if (map?.["yt:abc123"]?.cues?.length !== 2)
+  throw new Error(`auto subs not stored: ${JSON.stringify(map)}`);
+
+// 5. Per-video subtitles take priority; empty-before-first-cue path proves lookup
+//    (the global manual cue at 60s would be visible at t=30, the yt one at 61s is not)
+storage.set("catchup.subsByVideo", {
+  "yt:abc123": { label: "auto", savedAt: 1, cues: [{ startMs: 61_000, endMs: 62_000, text: "Later" }] },
+});
+res = await send(ask(30, "yt:abc123"));
+if (res.ok !== true || !/No dialogue has occurred yet/.test(res.answer))
+  throw new Error(`per-video subtitles were not preferred: ${JSON.stringify(res)}`);
+
+// 6. Unknown videoKey falls back to the global manual subtitles (no_subtitles would be wrong)
+res = await send(ask(10, "yt:unknown"));
+if (res.ok !== true || !/No dialogue has occurred yet/.test(res.answer))
+  throw new Error(`manual fallback broken: ${JSON.stringify(res)}`);
+
+console.log("smoke test passed: bundle loads; key/subs guards, auto-capture storage, and per-video lookup all behave");

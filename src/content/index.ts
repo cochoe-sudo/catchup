@@ -5,7 +5,7 @@
  * are classic scripts, not ES modules. `import type` only.
  */
 
-import type { GetStateRequest, GetStateResponse } from "../lib/messages";
+import type { AutoSubsMessage, GetStateRequest, GetStateResponse } from "../lib/messages";
 
 /** The main playback <video>, or null. Prefers YouTube's main player, then the largest video with media loaded (skips ad/preview players). */
 function findMainVideo(): HTMLVideoElement | null {
@@ -52,6 +52,20 @@ function detectTitle(): string {
   return document.title || "Unknown title";
 }
 
+/** Stable per-video key, matching what the page-world capture scripts emit. */
+function computeVideoKey(): string | null {
+  const host = location.hostname;
+  if (host.includes("youtube.com")) {
+    const videoId = new URLSearchParams(location.search).get("v");
+    return videoId ? `yt:${videoId}` : null;
+  }
+  if (host.includes("netflix.com")) {
+    const movieId = /\/watch\/(\d+)/.exec(location.pathname)?.[1];
+    return movieId ? `nf:${movieId}` : null;
+  }
+  return null;
+}
+
 chrome.runtime.onMessage.addListener(
   (message: GetStateRequest, _sender, sendResponse: (r: GetStateResponse) => void) => {
     if (message?.type !== "CATCHUP_GET_STATE") return;
@@ -67,6 +81,37 @@ chrome.runtime.onMessage.addListener(
       title: detectTitle(),
       currentTimeSec: video.currentTime,
       paused: video.paused,
+      videoKey: computeVideoKey(),
     });
   },
 );
+
+// Relay auto-captured subtitles from the page-world scripts to the background.
+document.addEventListener("catchup:subtitles", (event) => {
+  const detail = (event as CustomEvent<unknown>).detail;
+  if (typeof detail !== "string") return;
+  try {
+    const payload = JSON.parse(detail) as { videoKey?: unknown; label?: unknown; vtt?: unknown };
+    if (
+      typeof payload.videoKey !== "string" ||
+      typeof payload.label !== "string" ||
+      typeof payload.vtt !== "string"
+    ) {
+      return;
+    }
+    const message: AutoSubsMessage = {
+      type: "CATCHUP_AUTO_SUBS",
+      videoKey: payload.videoKey,
+      label: payload.label,
+      vtt: payload.vtt,
+    };
+    void chrome.runtime.sendMessage(message).catch(() => {
+      // background asleep/unavailable — the page script will re-publish on ping
+    });
+  } catch {
+    // malformed payload — ignore
+  }
+});
+
+// The page script may have captured subtitles before this listener attached.
+document.dispatchEvent(new CustomEvent("catchup:ready"));

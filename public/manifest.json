@@ -9,11 +9,24 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "minimum_chrome_version": "111",
   "content_scripts": [
     {
       "matches": ["*://*.netflix.com/*", "*://*.youtube.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["page-youtube.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://*.netflix.com/*"],
+      "js": ["page-netflix.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "action": {
