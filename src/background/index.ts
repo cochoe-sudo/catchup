@@ -86,6 +86,11 @@ async function handleAutoSubs(message: AutoSubsMessage): Promise<AutoSubsRespons
   return { ok: true, lines: cues.length };
 }
 
+// Subtitle segments arrive in bursts (players fetch several at once) and
+// handleAutoSubs is a read-modify-write on storage — run them strictly in
+// sequence or concurrent merges clobber each other's cues.
+let autoSubsQueue: Promise<unknown> = Promise.resolve();
+
 async function handleAsk(request: AskRequest): Promise<AskResponse> {
   const stored = await chrome.storage.local.get([
     STORAGE_KEYS.provider,
@@ -154,9 +159,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message?.type === "CATCHUP_AUTO_SUBS") {
-    handleAutoSubs(message as AutoSubsMessage)
-      .then(sendResponse)
-      .catch((err: unknown) =>
+    autoSubsQueue = autoSubsQueue
+      .catch(() => {})
+      .then(() => handleAutoSubs(message as AutoSubsMessage))
+      .then(sendResponse, (err: unknown) =>
         sendResponse({
           ok: false,
           error: err instanceof Error ? err.message : String(err),

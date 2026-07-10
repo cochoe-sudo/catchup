@@ -1,5 +1,7 @@
 # CatchUp
 
+[![CI](https://github.com/cochoe-sudo/catchup/actions/workflows/ci.yml/badge.svg)](https://github.com/cochoe-sudo/catchup/actions/workflows/ci.yml)
+
 Spoiler-safe Q&A Chrome extension for streaming video. Missed something while
 watching? Click the toolbar icon, ask in the sidebar — CatchUp answers using
 **only the dialogue up to your current timestamp**, never anything after it.

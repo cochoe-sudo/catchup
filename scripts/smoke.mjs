@@ -129,6 +129,20 @@ const merged = storage.get("catchup.subsByVideo")["gen:max.com/video/1"];
 if (merged.cues.length !== 2 || merged.cues[1].text !== "Segment two line.")
   throw new Error(`merge did not union segments: ${JSON.stringify(merged.cues)}`);
 
+// 4d2. CONCURRENT merge sends must not clobber each other (players fetch
+// segments in bursts; regression test for the read-modify-write race)
+const seg = (n, t) => ({
+  type: "CATCHUP_AUTO_SUBS",
+  videoKey: "gen:race.com/v/1",
+  label: "captions · captured from stream",
+  vtt: `WEBVTT\n\n00:${String(n).padStart(2, "0")}.000 --> 00:${String(n + 1).padStart(2, "0")}.000\n${t}\n`,
+  mode: "merge",
+});
+await Promise.all([send(seg(1, "Race one.")), send(seg(30, "Race two.")), send(seg(45, "Race three."))]);
+const raced = storage.get("catchup.subsByVideo")["gen:race.com/v/1"];
+if (raced.cues.length !== 3)
+  throw new Error(`concurrent merges lost cues: ${JSON.stringify(raced.cues)}`);
+
 // 4e. TTML payloads parse too (several streaming services use TTML, not VTT)
 autoRes = await send({
   type: "CATCHUP_AUTO_SUBS",
