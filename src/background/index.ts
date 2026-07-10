@@ -6,7 +6,7 @@
  */
 
 import { cuesUpTo, formatTimestamp, formatTranscript } from "../lib/truncate";
-import { parseSubtitles, sanitizeCueText } from "../lib/subtitles";
+import { parseSubtitleText, sanitizeCueText } from "../lib/subtitles";
 import type { Cue } from "../lib/subtitles";
 import { buildSystemPrompt, EMPTY_TRANSCRIPT_ANSWER } from "../lib/prompt";
 import { MAX_STORED_VIDEOS, STORAGE_KEYS } from "../lib/messages";
@@ -49,7 +49,7 @@ function cuesFromPayload(raw: NonNullable<AutoSubsMessage["cues"]>): Cue[] {
 async function handleAutoSubs(message: AutoSubsMessage): Promise<AutoSubsResponse> {
   let cues: Cue[];
   try {
-    cues = message.cues ? cuesFromPayload(message.cues) : parseSubtitles(message.vtt ?? "");
+    cues = message.cues ? cuesFromPayload(message.cues) : parseSubtitleText(message.vtt ?? "");
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -57,9 +57,21 @@ async function handleAutoSubs(message: AutoSubsMessage): Promise<AutoSubsRespons
     return { ok: false, error: "No usable subtitle lines found." };
   }
 
-  const stored: StoredSubtitles = { label: message.label, cues, savedAt: Date.now() };
   const current = await chrome.storage.local.get(STORAGE_KEYS.subsByVideo);
   const map = (current[STORAGE_KEYS.subsByVideo] ?? {}) as SubsByVideo;
+
+  // Sniffed segments and progressive textTracks arrive piecemeal — union them
+  // with what's already stored for this video instead of replacing it.
+  const existing = map[message.videoKey];
+  if (message.mode === "merge" && existing) {
+    const union = new Map<string, Cue>();
+    for (const cue of [...existing.cues, ...cues]) {
+      union.set(`${cue.startMs}|${cue.text}`, cue);
+    }
+    cues = Array.from(union.values()).sort((a, b) => a.startMs - b.startMs);
+  }
+
+  const stored: StoredSubtitles = { label: message.label, cues, savedAt: Date.now() };
   map[message.videoKey] = stored;
 
   const keys = Object.keys(map);
@@ -106,7 +118,7 @@ async function handleAsk(request: AskRequest): Promise<AskResponse> {
       ok: false,
       code: "no_subtitles",
       error:
-        "No subtitles for this video yet. They're usually captured automatically a few seconds after playback starts — or load an .srt/.vtt file manually.",
+        "No subtitles for this video yet. Turn captions ON in the player for a few seconds (many sites only download subtitles when captions are showing) — or load an .srt/.vtt file manually.",
     };
   }
 
@@ -170,7 +182,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 function pageScriptFor(url: string): string {
   if (url.includes("youtube.com")) return "page-youtube.js";
   if (url.includes("netflix.com")) return "page-netflix.js";
-  return "page-texttracks.js";
+  return "page-generic.js";
 }
 
 async function injectInto(tabId: number, url: string): Promise<void> {

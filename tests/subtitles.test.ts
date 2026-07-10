@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseSubtitles, parseTimestamp } from "../src/lib/subtitles";
+import {
+  parseSubtitles,
+  parseSubtitleText,
+  parseTimestamp,
+  parseTTML,
+  parseTTMLTime,
+} from "../src/lib/subtitles";
 
 describe("parseTimestamp", () => {
   it("parses SRT comma format", () => {
@@ -149,6 +155,69 @@ First
   it("throws on input with no cues", () => {
     expect(() => parseSubtitles("this is not a subtitle file")).toThrow(/No subtitle cues/);
     expect(() => parseSubtitles("")).toThrow(/No subtitle cues/);
+  });
+});
+
+describe("parseTTMLTime", () => {
+  const t = (raw: string) => parseTTMLTime(raw, 10_000_000, 30);
+
+  it("parses clock times with fractions", () => {
+    expect(t("00:01:02")).toBe(62_000);
+    expect(t("00:01:02.345")).toBe(62_345);
+    expect(t("01:00:00.5")).toBe(3_600_500);
+  });
+
+  it("parses frame-based clock times", () => {
+    expect(t("00:00:02:15")).toBe(2_500); // 15 frames @ 30fps = 500ms
+  });
+
+  it("parses offset times in every unit", () => {
+    expect(t("90s")).toBe(90_000);
+    expect(t("1500ms")).toBe(1_500);
+    expect(t("2m")).toBe(120_000);
+    expect(t("1.5h")).toBe(5_400_000);
+    expect(t("60f")).toBe(2_000); // 60 frames @ 30fps
+    expect(t("107607500t")).toBe(10_761); // ticks @ 10,000,000/s
+  });
+
+  it("rejects garbage", () => {
+    expect(t("later")).toBeNull();
+    expect(t("00:99:00")).toBeNull();
+  });
+});
+
+const BASIC_TTML = `<?xml version="1.0" encoding="UTF-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttp="http://www.w3.org/ns/ttml#parameter" ttp:tickRate="10000000">
+  <body><div>
+    <p begin="10000000t" end="30000000t">Hello <span tts:fontStyle="italic">there</span>.</p>
+    <p begin="00:00:04.500" end="00:00:06.000">Where were you?<br/>At the hospital.</p>
+    <p begin="00:00:09.000" end="00:00:10.000"></p>
+    <p end="00:00:12.000">no begin, skipped</p>
+  </div></body>
+</tt>`;
+
+describe("parseTTML", () => {
+  it("parses cues with tick and clock times, strips spans, converts <br>", () => {
+    const cues = parseTTML(BASIC_TTML);
+    expect(cues).toHaveLength(2);
+    expect(cues[0]).toEqual({ startMs: 1000, endMs: 3000, text: "Hello there." });
+    expect(cues[1]!.startMs).toBe(4500);
+    expect(cues[1]!.text).toBe("Where were you? At the hospital.");
+  });
+
+  it("throws when no cues are present", () => {
+    expect(() => parseTTML("<tt></tt>")).toThrow(/No subtitle cues/);
+  });
+});
+
+describe("parseSubtitleText — format dispatch", () => {
+  it("routes TTML documents to the TTML parser", () => {
+    expect(parseSubtitleText(BASIC_TTML)).toHaveLength(2);
+  });
+
+  it("routes VTT and SRT to the cue-block parser", () => {
+    expect(parseSubtitleText(BASIC_VTT)).toHaveLength(2);
+    expect(parseSubtitleText(BASIC_SRT)).toHaveLength(3);
   });
 });
 

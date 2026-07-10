@@ -18,15 +18,21 @@ export interface OpenOptionsMessage {
   type: "CATCHUP_OPEN_OPTIONS";
 }
 
-/** Captured subtitles: raw file text (auto-capture VTT or manual .srt/.vtt) or pre-extracted cues (textTracks). */
+/** Captured subtitles: raw subtitle text (SRT/VTT/TTML) or pre-extracted cues. */
 export interface AutoSubsMessage {
   type: "CATCHUP_AUTO_SUBS";
   videoKey: string;
   label: string;
-  /** Raw SRT/VTT text to parse. */
+  /** Raw SRT/VTT/TTML text to parse. */
   vtt?: string;
   /** Already-extracted cues (from the generic textTracks capture). */
   cues?: Cue[];
+  /**
+   * "replace" (default): this payload is the complete subtitle set.
+   * "merge": union with what's already stored — used for network-sniffed
+   * segments and progressive textTracks, which arrive piecemeal.
+   */
+  mode?: "replace" | "merge";
 }
 
 export type AutoSubsResponse = { ok: true; lines: number } | { ok: false; error: string };

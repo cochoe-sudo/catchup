@@ -14,11 +14,11 @@ export default defineConfig({
         content: "src/content/index.ts",
         "page-youtube": "src/page/youtube.ts",
         "page-netflix": "src/page/netflix.ts",
-        "page-texttracks": "src/page/texttracks.ts",
+        "page-generic": "src/page/generic.ts",
       },
       output: {
         entryFileNames: (chunk) =>
-          ["background", "content", "page-youtube", "page-netflix", "page-texttracks"].includes(
+          ["background", "content", "page-youtube", "page-netflix", "page-generic"].includes(
             chunk.name,
           )
             ? "[name].js"

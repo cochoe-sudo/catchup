@@ -31,8 +31,23 @@ const PORT = 8907;
 
 const VTT =
   "WEBVTT\n\n00:01.000 --> 00:03.000\nShe was rushed to the hospital.\n\n00:05.000 --> 00:07.000\nThe doctor said it was poison.\n";
+const SEGMENT_1 = "WEBVTT\n\n00:01.000 --> 00:02.000\nSegment one.\n";
+const SEGMENT_2 = "WEBVTT\n\n00:30.000 --> 00:31.000\nSegment two.\n";
 const server = http.createServer((req, res) => {
-  if (req.url.startsWith("/watch")) {
+  if (req.url.startsWith("/watch2")) {
+    // Custom-caption player à la HBO Max: no <track>; the page downloads
+    // subtitle segments itself (one fetch, one XHR) and renders them in DOM.
+    res.setHeader("content-type", "text/html");
+    res.end(`<!doctype html><html><head><title>Sniffer Show - MaxLike</title></head><body>
+      <video></video>
+      <script>
+        fetch("/seg1.vtt").then((r) => r.text());
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "/seg2.vtt");
+        xhr.send();
+      </script>
+    </body></html>`);
+  } else if (req.url.startsWith("/watch")) {
     res.setHeader("content-type", "text/html");
     res.end(`<!doctype html><html><head><title>Demo Stream - StreamFlixx</title></head><body>
       <video>
@@ -42,6 +57,12 @@ const server = http.createServer((req, res) => {
   } else if (req.url.startsWith("/subs.vtt")) {
     res.setHeader("content-type", "text/vtt");
     res.end(VTT);
+  } else if (req.url.startsWith("/seg1.vtt")) {
+    res.setHeader("content-type", "text/vtt");
+    res.end(SEGMENT_1);
+  } else if (req.url.startsWith("/seg2.vtt")) {
+    res.setHeader("content-type", "text/vtt");
+    res.end(SEGMENT_2);
   } else {
     res.statusCode = 404;
     res.end();
@@ -130,7 +151,27 @@ try {
   console.log("answer:", JSON.stringify(answer));
   if (!/No dialogue has occurred yet/.test(answer)) throw new Error("expected canned empty-transcript answer");
 
-  console.log("browser smoke test passed: generic-site capture + sidebar + ask round trip all work");
+  // ---- network-sniffer path (custom-caption players like HBO Max) ----------
+  const page2 = await context.newPage();
+  await page2.goto(`http://127.0.0.1:${PORT}/watch2`, { waitUntil: "domcontentloaded" });
+  const deadline2 = Date.now() + 15_000;
+  let sniffed;
+  for (;;) {
+    sniffed = await options.evaluate(async (port) => {
+      const stored = await chrome.storage.local.get("catchup.subsByVideo");
+      const entry = (stored["catchup.subsByVideo"] ?? {})[`gen:127.0.0.1:${port}/watch2`];
+      return entry ? entry.cues.map((c) => c.text) : null;
+    }, PORT);
+    if (sniffed && sniffed.length === 2) break;
+    if (Date.now() > deadline2)
+      throw new Error(`network sniffer capture failed: ${JSON.stringify(sniffed)}`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  console.log("network-sniffed segments merged (fetch + XHR):", JSON.stringify(sniffed));
+
+  console.log(
+    "browser smoke test passed: textTracks capture, network sniffing, sidebar, and ask round trip all work",
+  );
 } finally {
   await context.close();
   server.close();

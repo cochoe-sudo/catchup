@@ -35,7 +35,7 @@
     {
       "matches": ["<all_urls>"],
       "exclude_matches": ["*://*.youtube.com/*", "*://*.netflix.com/*"],
-      "js": ["page-texttracks.js"],
+      "js": ["page-generic.js"],
       "run_at": "document_start",
       "world": "MAIN"
     }

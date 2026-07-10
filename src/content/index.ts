@@ -99,6 +99,7 @@ import type {
         label?: unknown;
         vtt?: unknown;
         cues?: unknown;
+        mode?: unknown;
       };
       if (typeof payload.videoKey !== "string" || typeof payload.label !== "string") return;
       const message: AutoSubsMessage = {
@@ -107,6 +108,7 @@ import type {
         label: payload.label,
         ...(typeof payload.vtt === "string" ? { vtt: payload.vtt } : {}),
         ...(Array.isArray(payload.cues) ? { cues: payload.cues as AutoSubsMessage["cues"] } : {}),
+        ...(payload.mode === "merge" ? { mode: "merge" as const } : {}),
       };
       if (!message.vtt && !message.cues) return;
       void chrome.runtime.sendMessage(message).catch(() => {});
@@ -396,7 +398,7 @@ import type {
       ui.status.textContent = `${active.cues.length} lines · ${active.label}`;
       ui.status.classList.add("loaded");
     } else {
-      ui.status.textContent = "Looking for subtitles… (or load a file)";
+      ui.status.textContent = "Looking for subtitles… turn captions ON in the player";
       ui.status.classList.remove("loaded");
     }
   }

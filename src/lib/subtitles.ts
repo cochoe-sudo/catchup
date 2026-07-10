@@ -114,3 +114,91 @@ export function parseSubtitles(input: string): Cue[] {
   cues.sort((a, b) => a.startMs - b.startMs);
   return cues;
 }
+
+// ---------------------------------------------------------------------------
+// TTML (a.k.a. DFXP / SMPTE-TT) — the XML subtitle format several streaming
+// services deliver instead of WebVTT. Parsed with regexes because service
+// workers have no DOMParser.
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a TTML time expression to milliseconds.
+ * Supports clock times ("HH:MM:SS", "HH:MM:SS.mmm", "HH:MM:SS:frames") and
+ * offset times ("123.4s", "5400ms", "2.5h", "90m", "300f", "107607500t").
+ */
+export function parseTTMLTime(
+  raw: string,
+  tickRate: number,
+  frameRate: number,
+): number | null {
+  const trimmed = raw.trim();
+
+  const offset = /^([\d.]+)(h|ms|m|s|f|t)$/.exec(trimmed);
+  if (offset) {
+    const value = parseFloat(offset[1]!);
+    if (!Number.isFinite(value)) return null;
+    switch (offset[2]) {
+      case "h":
+        return Math.round(value * 3_600_000);
+      case "m":
+        return Math.round(value * 60_000);
+      case "s":
+        return Math.round(value * 1000);
+      case "ms":
+        return Math.round(value);
+      case "f":
+        return Math.round((value / frameRate) * 1000);
+      case "t":
+        return Math.round((value / tickRate) * 1000);
+    }
+  }
+
+  // Clock time: HH:MM:SS | HH:MM:SS.fraction | HH:MM:SS:frames
+  const clock = /^(\d+):(\d{1,2}):(\d{1,2})(?:\.(\d+))?(?::(\d+))?$/.exec(trimmed);
+  if (!clock) return null;
+  const hours = parseInt(clock[1]!, 10);
+  const minutes = parseInt(clock[2]!, 10);
+  const seconds = parseInt(clock[3]!, 10);
+  if (minutes >= 60 || seconds >= 60) return null;
+  let ms = ((hours * 60 + minutes) * 60 + seconds) * 1000;
+  if (clock[4]) ms += Math.round(parseFloat(`0.${clock[4]}`) * 1000);
+  if (clock[5]) ms += Math.round((parseInt(clock[5], 10) / frameRate) * 1000);
+  return ms;
+}
+
+/** Parse a TTML/DFXP document into time-sorted cues. Throws if none found. */
+export function parseTTML(input: string): Cue[] {
+  const ttTag = /<tt[\s>][^>]*/i.exec(input)?.[0] ?? "";
+  const tickRate =
+    parseFloat(/ttp:tickRate="([\d.]+)"/i.exec(ttTag)?.[1] ?? "") || 10_000_000;
+  const frameRate = parseFloat(/ttp:frameRate="([\d.]+)"/i.exec(ttTag)?.[1] ?? "") || 30;
+
+  const cues: Cue[] = [];
+  const pattern = /<p\b([^>]*)>([\s\S]*?)<\/p>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(input))) {
+    const attrs = match[1]!;
+    const begin = /begin="([^"]+)"/.exec(attrs)?.[1];
+    if (!begin) continue;
+    const end = /end="([^"]+)"/.exec(attrs)?.[1];
+    const startMs = parseTTMLTime(begin, tickRate, frameRate);
+    if (startMs === null) continue;
+    const endMs = (end ? parseTTMLTime(end, tickRate, frameRate) : null) ?? startMs;
+
+    const text = cleanCueText(match[2]!.replace(/<br\s*\/?>/gi, "\n").split("\n"));
+    if (!text) continue;
+    cues.push({ startMs, endMs, text });
+  }
+
+  if (cues.length === 0) {
+    throw new Error("No subtitle cues found in the TTML document.");
+  }
+  cues.sort((a, b) => a.startMs - b.startMs);
+  return cues;
+}
+
+/** Parse any supported subtitle text: SRT, WebVTT, or TTML/DFXP. */
+export function parseSubtitleText(input: string): Cue[] {
+  if (/<tt[\s>]/i.test(input.slice(0, 3000))) return parseTTML(input);
+  return parseSubtitles(input);
+}

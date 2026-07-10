@@ -109,6 +109,37 @@ if (genEntry.cues[0].text !== "First" || genEntry.cues[1].text !== "Second")
 autoRes = await send({ type: "CATCHUP_AUTO_SUBS", videoKey: "gen:x/y", label: "bad.srt", vtt: "not a subtitle file" });
 if (autoRes.ok !== false) throw new Error("unparseable subtitles must return ok:false");
 
+// 4d. Merge mode: sniffed segments union with what's stored (dupes collapse)
+autoRes = await send({
+  type: "CATCHUP_AUTO_SUBS",
+  videoKey: "gen:max.com/video/1",
+  label: "captions · captured from stream",
+  vtt: "WEBVTT\n\n00:01.000 --> 00:02.000\nSegment one line.\n",
+  mode: "merge",
+});
+autoRes = await send({
+  type: "CATCHUP_AUTO_SUBS",
+  videoKey: "gen:max.com/video/1",
+  label: "captions · captured from stream",
+  vtt: "WEBVTT\n\n00:01.000 --> 00:02.000\nSegment one line.\n\n00:30.000 --> 00:31.000\nSegment two line.\n",
+  mode: "merge",
+});
+if (autoRes.ok !== true) throw new Error(`merge send failed: ${JSON.stringify(autoRes)}`);
+const merged = storage.get("catchup.subsByVideo")["gen:max.com/video/1"];
+if (merged.cues.length !== 2 || merged.cues[1].text !== "Segment two line.")
+  throw new Error(`merge did not union segments: ${JSON.stringify(merged.cues)}`);
+
+// 4e. TTML payloads parse too (several streaming services use TTML, not VTT)
+autoRes = await send({
+  type: "CATCHUP_AUTO_SUBS",
+  videoKey: "gen:max.com/video/2",
+  label: "captions · captured from stream",
+  vtt: '<?xml version="1.0"?><tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="00:00:01.000" end="00:00:02.000">TTML line.</p></div></body></tt>',
+  mode: "merge",
+});
+if (autoRes.ok !== true || autoRes.lines !== 1)
+  throw new Error(`TTML payload failed: ${JSON.stringify(autoRes)}`);
+
 // 5. Per-video subtitles take priority; empty-before-first-cue path proves lookup
 //    (the global manual cue at 60s would be visible at t=30, the yt one at 61s is not)
 storage.set("catchup.subsByVideo", {

@@ -23,10 +23,14 @@ literally cannot see what happens next.
    reads the player's caption track list and fetches the best track as WebVTT.
    On Netflix, it hooks `JSON.parse` to catch the play manifest (the Subadub
    technique) and fetches the WebVTT subtitle track the player already uses.
-   Everywhere else, a generic script harvests the player's native HTML5
-   `textTracks` (nudging disabled tracks to "hidden" so their cues load).
-   Captured subtitles are stored per video, so switching episodes just works.
-   Manual `.srt`/`.vtt` loading remains as an override/fallback.
+   Everywhere else, a generic script combines two strategies: it harvests the
+   player's native HTML5 `textTracks` (nudging disabled tracks to "hidden" so
+   their cues load), and it hooks `fetch`/`XMLHttpRequest` to capture the
+   WebVTT/TTML subtitle segments that custom-caption players (HBO Max, Hulu,
+   Disney+, …) download themselves — segments merge into one transcript as
+   playback progresses. Captured subtitles are stored per video, so switching
+   episodes just works. Manual `.srt`/`.vtt` loading remains as an
+   override/fallback.
 3. When you ask, the sidebar reads the video's **live** `currentTime` straight
    from the page and the background truncates this video's subtitles to cues
    with `start <= currentTime` — on **every** question, so seeking
@@ -76,25 +80,28 @@ npm test             # unit tests (subtitle parser + truncation logic)
 
 The spoiler boundary is the product, so it's tested at three levels:
 
-- **Unit** (`npm test`, Vitest): 36 tests over the SRT/VTT parser (timestamp
-  formats, CRLF/BOM, voice tags, entities, malformed blocks) and the
-  truncation logic (exact-boundary inclusion, 1ms-after exclusion, backward
-  seeks, unsorted input, NaN/negative times).
+- **Unit** (`npm test`, Vitest): 44 tests over the SRT/VTT/TTML parsers
+  (timestamp formats incl. TTML ticks/frames/offsets, CRLF/BOM, voice tags,
+  entities, malformed blocks) and the truncation logic (exact-boundary
+  inclusion, 1ms-after exclusion, backward seeks, unsorted input,
+  NaN/negative times).
 - **Bundle smoke** (`node scripts/smoke.mjs`): loads the *built* service
   worker in Node with a chrome stub and drives the message handler through
   every non-network path (key/subtitle gates, cue-payload sanitization,
   per-video lookup precedence).
 - **Browser end-to-end** (`node scripts/browser-smoke.mjs`): loads the
-  unpacked extension into headless Chromium, serves a mock streaming site
-  with a native `<track>`, and verifies the real flow — textTracks
-  auto-capture → per-video storage → sidebar toggle → ask → truncated-
-  transcript answer — without needing an API key or reaching the network.
+  unpacked extension into headless Chromium and serves two mock streaming
+  sites — one with a native `<track>`, one that downloads VTT segments
+  itself via fetch/XHR like HBO Max — verifying the real flow: auto-capture
+  (both strategies) → per-video storage → sidebar toggle → ask →
+  truncated-transcript answer, without needing an API key or external
+  network.
 
 ## Project layout
 
 ```
 public/manifest.json      MV3 manifest
-src/lib/subtitles.ts      SRT/VTT → timestamped cues (lenient, tag-stripping)
+src/lib/subtitles.ts      SRT/VTT/TTML → timestamped cues (lenient, tag-stripping)
 src/lib/truncate.ts       spoiler boundary: cues with start <= currentTime
 src/lib/prompt.ts         spoiler-safety system prompt
 src/lib/messages.ts       typed message contracts + storage keys
@@ -111,9 +118,12 @@ tests/                    vitest suites for parser + truncation
 
 - Auto-capture prefers English tracks; other languages fall back to the first
   usable track. Manual loading always wins for the current video.
-- Auto-capture depends on site internals (YouTube player response, Netflix
-  manifest shape, native textTracks elsewhere) — sites with fully custom
-  caption pipelines won't auto-capture; manual loading still works there.
+- On custom-caption sites (HBO Max and similar), subtitles are sniffed from
+  the player's own downloads, which usually happen only while **captions are
+  turned ON** in the player, and only for the parts of the video the player
+  has buffered — start captions early for the fullest transcript. Sites that
+  encrypt or embed subtitles in the media stream itself won't auto-capture;
+  manual loading still works there.
 - The last 8 videos' subtitles are kept (LRU); the full truncated transcript
   is sent on each question (no windowing/summarization yet).
 - No audio fingerprinting, no multi-episode memory, no accounts.
