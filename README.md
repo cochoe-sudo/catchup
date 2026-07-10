@@ -7,6 +7,13 @@ watching? Click the toolbar icon, ask in the sidebar — CatchUp answers using
 Works on **any site with an HTML5 video player**; YouTube and Netflix get
 dedicated subtitle capture.
 
+![CatchUp sidebar over a streaming page](docs/sidebar.png)
+
+**Why this exists:** asking your phone "wait, why is she in the hospital?"
+gets you a wiki answer full of spoilers. CatchUp builds its knowledge from the
+video's own subtitles, hard-truncated at your playback position — the model
+literally cannot see what happens next.
+
 ## How it works
 
 1. **Click the CatchUp toolbar icon** on any video page: a translucent
@@ -65,6 +72,24 @@ npm run dev          # rebuild on change (reload the extension to pick up)
 npm test             # unit tests (subtitle parser + truncation logic)
 ```
 
+## Testing
+
+The spoiler boundary is the product, so it's tested at three levels:
+
+- **Unit** (`npm test`, Vitest): 36 tests over the SRT/VTT parser (timestamp
+  formats, CRLF/BOM, voice tags, entities, malformed blocks) and the
+  truncation logic (exact-boundary inclusion, 1ms-after exclusion, backward
+  seeks, unsorted input, NaN/negative times).
+- **Bundle smoke** (`node scripts/smoke.mjs`): loads the *built* service
+  worker in Node with a chrome stub and drives the message handler through
+  every non-network path (key/subtitle gates, cue-payload sanitization,
+  per-video lookup precedence).
+- **Browser end-to-end** (`node scripts/browser-smoke.mjs`): loads the
+  unpacked extension into headless Chromium, serves a mock streaming site
+  with a native `<track>`, and verifies the real flow — textTracks
+  auto-capture → per-video storage → sidebar toggle → ask → truncated-
+  transcript answer — without needing an API key or reaching the network.
+
 ## Project layout
 
 ```
@@ -92,3 +117,7 @@ tests/                    vitest suites for parser + truncation
 - The last 8 videos' subtitles are kept (LRU); the full truncated transcript
   is sent on each question (no windowing/summarization yet).
 - No audio fingerprinting, no multi-episode memory, no accounts.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
